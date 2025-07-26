@@ -7,8 +7,10 @@ from django.contrib.auth import authenticate
 from rest_framework.authtoken.models import Token
 from .models import Task
 from .serializers import TaskSerializer, UserSerializer
+from rest_framework.permissions import AllowAny
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def register_user(request):
     username = request.data.get('username')
     password = request.data.get('password')
@@ -26,6 +28,7 @@ def register_user(request):
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def login_user(request):
     username = request.data.get('username')
     password = request.data.get('password')

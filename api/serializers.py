@@ -7,8 +7,6 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'email']
 
-from rest_framework import serializers
-from .models import Task
 
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
