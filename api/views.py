@@ -1,13 +1,16 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action, api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from rest_framework.authtoken.models import Token
-from .models import Task
-from .serializers import TaskSerializer, UserSerializer
-from rest_framework.permissions import AllowAny
+from django.db.models import Q
+from datetime import datetime
+
+from .models import Task, AuditLog
+from .serializers import TaskSerializer, UserSerializer, AdminUserSerializer
+
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -24,7 +27,13 @@ def register_user(request):
 
     user = User.objects.create_user(username=username, password=password, email=email)
     token = Token.objects.create(user=user)
-    return Response({'token': token.key, 'user_id': user.id, 'username': user.username})
+    return Response({
+        'token': token.key,
+        'user_id': user.id,
+        'username': user.username,
+        'is_staff': user.is_staff,
+        'is_superuser': user.is_superuser,
+    })
 
 
 @api_view(['POST'])
@@ -33,10 +42,16 @@ def login_user(request):
     username = request.data.get('username')
     password = request.data.get('password')
     user = authenticate(username=username, password=password)
-    
+
     if user:
         token, _ = Token.objects.get_or_create(user=user)
-        return Response({'token': token.key, 'user_id': user.id, 'username': user.username})
+        return Response({
+            'token': token.key,
+            'user_id': user.id,
+            'username': user.username,
+            'is_staff': user.is_staff,
+            'is_superuser': user.is_superuser,
+        })
     return Response({'error': 'Invalid Credentials'}, status=400)
 
 
@@ -61,11 +76,94 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         return tasks
 
-    # def perform_create(self, serializer):
-    #     serializer.save(user=self.request.user)
-    
     def perform_create(self, serializer):
-        print("User:", self.request.user)
-        serializer.save(user=self.request.user)
+        task = serializer.save(user=self.request.user)
+        AuditLog.objects.create(user=self.request.user, action='create', task=task)
+
+    def perform_update(self, serializer):
+        instance = self.get_object()
+        was_completed = instance.is_completed
+        task = serializer.save()
+        # If completion state changed, record precise action; otherwise generic update
+        now_completed = task.is_completed
+        if was_completed != now_completed:
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='complete_true' if now_completed else 'complete_false',
+                task=task
+            )
+        else:
+            AuditLog.objects.create(user=self.request.user, action='update', task=task)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # Log before delete so FK can still reference the task
+        AuditLog.objects.create(user=request.user, action='delete', task=instance)
+        return super().destroy(request, *args, **kwargs)
 
 
+# ----- Simple endpoint to log client-side-only events (import/export) -----
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def log_event(request):
+    action = request.data.get('action')
+    meta = request.data.get('meta', {}) or {}
+    if action not in ['import', 'export']:
+        return Response({'error': 'Unsupported action'}, status=400)
+    AuditLog.objects.create(user=request.user, action=action, meta=meta)
+    return Response({'status': 'ok'})
+
+
+# ----- Admin endpoints -----
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def admin_users(request):
+    qs = User.objects.all().order_by('-date_joined')
+
+    date_from = request.query_params.get('date_from')
+    date_to = request.query_params.get('date_to')
+    search = request.query_params.get('search')
+
+    if date_from:
+        qs = qs.filter(date_joined__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(date_joined__date__lte=date_to)
+    if search:
+        qs = qs.filter(Q(username__icontains=search) | Q(email__icontains=search))
+
+    data = AdminUserSerializer(qs, many=True).data
+    return Response(data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def admin_stats(request):
+    """
+    Optional query params: date_from, date_to, user_id
+    """
+    logs = AuditLog.objects.all()
+
+    date_from = request.query_params.get('date_from')
+    date_to = request.query_params.get('date_to')
+    user_id = request.query_params.get('user_id')
+
+    if user_id:
+        logs = logs.filter(user_id=user_id)
+    if date_from:
+        logs = logs.filter(created_at__date__gte=date_from)
+    if date_to:
+        logs = logs.filter(created_at__date__lte=date_to)
+
+    def count(action):
+        return logs.filter(action=action).count()
+
+    data = {
+        'tasks_created': count('create'),
+        'tasks_deleted': count('delete'),
+        'tasks_completed': count('complete_true'),
+        'tasks_uncompleted': count('complete_false'),
+        'tasks_updated': count('update'),
+        'imports': count('import'),
+        'exports': count('export'),
+    }
+    return Response(data)

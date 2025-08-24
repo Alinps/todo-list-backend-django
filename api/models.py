@@ -9,3 +9,30 @@ class Task(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class AuditLog(models.Model):
+    ACTION_CHOICES = [
+        ('create', 'Create Task'),
+        ('update', 'Update Task'),
+        ('delete', 'Delete Task'),
+        ('complete_true', 'Mark Complete'),
+        ('complete_false', 'Mark Incomplete'),
+        ('import', 'Import Tasks'),
+        ('export', 'Export Tasks'),
+    ]
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['action']),
+            models.Index(fields=['created_at']),
+            models.Index(fields=['user', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} {self.action} @ {self.created_at:%Y-%m-%d %H:%M}"
