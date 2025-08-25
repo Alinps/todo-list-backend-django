@@ -12,12 +12,51 @@ from .models import Task, AuditLog
 from .serializers import TaskSerializer, UserSerializer, AdminUserSerializer
 
 
+# @api_view(['POST'])
+# @permission_classes([AllowAny])
+# def register_user(request):
+#     username = request.data.get('username')
+#     password = request.data.get('password')
+#     email = request.data.get('email')
+    
+
+#     if not username or not password:
+#         return Response({'error': 'Username and password required'}, status=400)
+
+#     if User.objects.filter(username=username).exists():
+#         return Response({'error': 'User already exists'}, status=400)
+
+#     user = User.objects.create_user(username=username, password=password, email=email)
+#     token = Token.objects.create(user=user)
+#     return Response({
+#         'token': token.key,
+#         'user_id': user.id,
+#         'username': user.username,
+#         'is_staff': user.is_staff,
+#         'is_superuser': user.is_superuser,
+#     })
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.authtoken.models import Token
+from django.contrib.auth.models import User
+from .models import UserProfile  # import your Profile model
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.authtoken.models import Token
+from django.contrib.auth.models import User
+from .models import UserProfile
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register_user(request):
     username = request.data.get('username')
     password = request.data.get('password')
     email = request.data.get('email')
+    phone_number = request.data.get('phone_number')
 
     if not username or not password:
         return Response({'error': 'Username and password required'}, status=400)
@@ -25,15 +64,26 @@ def register_user(request):
     if User.objects.filter(username=username).exists():
         return Response({'error': 'User already exists'}, status=400)
 
+    # Create the user
     user = User.objects.create_user(username=username, password=password, email=email)
+    
+    # Create or update profile safely
+    profile, created = UserProfile.objects.get_or_create(user=user)
+    profile.phone_number = phone_number
+    profile.save()
+
+    # Create auth token
     token = Token.objects.create(user=user)
+
     return Response({
         'token': token.key,
         'user_id': user.id,
         'username': user.username,
         'is_staff': user.is_staff,
         'is_superuser': user.is_superuser,
-    })
+        'phone_number': profile.phone_number,
+    }, status=201)
+
 
 
 @api_view(['POST'])
