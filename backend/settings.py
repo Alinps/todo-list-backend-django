@@ -62,7 +62,7 @@ ROOT_URLCONF = 'backend.urls'
 CORS_ALLOW_ALL_ORIGINS = True
 
 CRONJOBS = [
-    ('0 9 * * *', 'tasks.cron.remind_due_tasks'),  # every day at 9 AM
+    ('* * * * *', 'tasks.cron.remind_due_tasks'),  # every minute
 ]
 
 

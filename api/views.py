@@ -217,3 +217,39 @@ def admin_stats(request):
         'exports': count('export'),
     }
     return Response(data)
+
+
+
+# views.py dedktop notification
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from datetime import date, timedelta
+from .models import Task
+from .serializers import TaskSerializer
+
+# @api_view(['GET'])
+# @permission_classes([AllowAny])
+# def tasks_due_tomorrow(request):
+#     tomorrow = date.today() + timedelta(days=1)
+#     tasks = Task.objects.filter(due_date=tomorrow, is_completed=False)
+#     serializer = TaskSerializer(tasks, many=True)
+#     return Response(serializer.data)
+
+
+from datetime import date, timedelta
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])  # switch to IsAuthenticated
+def tasks_due_tomorrow(request):
+    tomorrow = date.today() + timedelta(days=1)
+    tasks = Task.objects.filter(
+        due_date=tomorrow,
+        is_completed=False,
+        user=request.user  # only fetch tasks of the logged-in user
+    )
+    serializer = TaskSerializer(tasks, many=True)
+    return Response(serializer.data)
+
