@@ -107,7 +107,7 @@ def login_user(request):
 
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]  
 
     def get_queryset(self):
         user = self.request.user
@@ -253,3 +253,33 @@ def tasks_due_tomorrow(request):
     serializer = TaskSerializer(tasks, many=True)
     return Response(serializer.data)
 
+
+
+
+
+
+#view for notification scheduler endpoint
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from .models import Notification
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_notifications(request):
+    notifications = Notification.objects.filter(user=request.user, is_read=False).order_by('-created_at')
+    data = [{"id": n.id, "message": n.message, "created_at": n.created_at} for n in notifications]
+    return Response(data)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def mark_as_read(request, notification_id):
+    try:
+        notif = Notification.objects.get(id=notification_id, user=request.user)
+        notif.is_read = True
+        notif.save()
+        return Response({"status": "ok"})
+    except Notification.DoesNotExist:
+        return Response({"error": "Not found"}, status=404)
+
+ 

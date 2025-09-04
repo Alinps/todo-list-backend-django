@@ -1,5 +1,6 @@
 from utils.sms_service import send_sms
 from datetime import datetime
+from models import Task
 
 def notify_due_date(user, task):
     if task.due_date:
