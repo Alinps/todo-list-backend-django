@@ -105,6 +105,62 @@ def login_user(request):
     return Response({'error': 'Invalid Credentials'}, status=400)
 
 
+# class TaskViewSet(viewsets.ModelViewSet):
+#     serializer_class = TaskSerializer
+#     permission_classes = [IsAuthenticated]  
+
+#     def get_queryset(self):
+#         user = self.request.user
+#         tasks = Task.objects.filter(user=user).order_by('-due_date')
+
+#         status_param = self.request.query_params.get('status')
+#         search = self.request.query_params.get('search')
+
+#         if status_param == 'pending':
+#             tasks = tasks.filter(is_completed=False)
+#         elif status_param == 'completed':
+#             tasks = tasks.filter(is_completed=True)
+
+#         if search:
+#             tasks = tasks.filter(title__icontains=search)
+
+#         return tasks
+
+#     def perform_create(self, serializer):
+#         task = serializer.save(user=self.request.user)
+#         AuditLog.objects.create(user=self.request.user, action='create', task=task)
+
+#     def perform_update(self, serializer):
+#         instance = self.get_object()
+#         was_completed = instance.is_completed
+#         task = serializer.save()
+#         # If completion state changed, record precise action; otherwise generic update
+#         now_completed = task.is_completed
+#         if was_completed != now_completed:
+#             AuditLog.objects.create(
+#                 user=self.request.user,
+#                 action='complete_true' if now_completed else 'complete_false',
+#                 task=task
+#             )
+#         else:
+#             AuditLog.objects.create(user=self.request.user, action='update', task=task)
+
+#     def destroy(self, request, *args, **kwargs):
+#         instance = self.get_object()
+#         # Log before delete so FK can still reference the task
+#         AuditLog.objects.create(user=request.user, action='delete', task=instance)
+#         return super().destroy(request, *args, **kwargs)
+
+
+
+
+from rest_framework import viewsets, status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from .models import Task, AuditLog, UserProfile
+from .serializers import TaskSerializer
+from rest_framework.exceptions import PermissionDenied
+
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     permission_classes = [IsAuthenticated]  
@@ -113,6 +169,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         user = self.request.user
         tasks = Task.objects.filter(user=user).order_by('-due_date')
 
+        # --- Filtering by status ---
         status_param = self.request.query_params.get('status')
         search = self.request.query_params.get('search')
 
@@ -121,22 +178,36 @@ class TaskViewSet(viewsets.ModelViewSet):
         elif status_param == 'completed':
             tasks = tasks.filter(is_completed=True)
 
+        # --- Search by title ---
         if search:
             tasks = tasks.filter(title__icontains=search)
 
         return tasks
 
+    # ---------- Task Create with Premium Check ----------
     def perform_create(self, serializer):
-        task = serializer.save(user=self.request.user)
-        AuditLog.objects.create(user=self.request.user, action='create', task=task)
+        user = self.request.user
+        profile = user.profile  # Profile auto-created via signals
 
+        # Count the user's tasks
+        task_count = Task.objects.filter(user=user).count()
+
+        # Restrict non-premium users to 5 tasks
+        if not profile.is_premium and task_count >= 5:
+           raise PermissionDenied("Free plan limit reached. Upgrade to premium.")
+        # Save task and log
+        task = serializer.save(user=user)
+        AuditLog.objects.create(user=user, action='create', task=task)
+
+    # ---------- Task Update ----------
     def perform_update(self, serializer):
         instance = self.get_object()
         was_completed = instance.is_completed
         task = serializer.save()
-        # If completion state changed, record precise action; otherwise generic update
+
         now_completed = task.is_completed
         if was_completed != now_completed:
+            # Log if completion state changed
             AuditLog.objects.create(
                 user=self.request.user,
                 action='complete_true' if now_completed else 'complete_false',
@@ -145,11 +216,29 @@ class TaskViewSet(viewsets.ModelViewSet):
         else:
             AuditLog.objects.create(user=self.request.user, action='update', task=task)
 
+    # ---------- Task Delete ----------
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         # Log before delete so FK can still reference the task
         AuditLog.objects.create(user=request.user, action='delete', task=instance)
         return super().destroy(request, *args, **kwargs)
+    
+# views.py
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+
+class ProfileViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=["post"])
+    def upgrade_premium(self, request):
+        profile = request.user.profile
+        profile.is_premium = True
+        profile.save()
+        return Response({"message": "You are now a premium user!"})
+
+
+
 
 
 # ----- Simple endpoint to log client-side-only events (import/export) -----

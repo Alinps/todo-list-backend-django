@@ -1,9 +1,11 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import TaskViewSet, register_user, login_user, admin_users, admin_stats, log_event,tasks_due_tomorrow,get_notifications,mark_as_read
+from .views import TaskViewSet, register_user, login_user, admin_users, admin_stats, log_event,tasks_due_tomorrow,get_notifications,mark_as_read,ProfileViewSet
 
 router = DefaultRouter()
-router.register('tasks', TaskViewSet, basename='tasks')
+# router.register('tasks', TaskViewSet, basename='tasks')
+router.register(r'tasks', TaskViewSet, basename='task')
+router.register(r'profile', ProfileViewSet, basename='profile')
 
 urlpatterns = [
     path('register/', register_user),
