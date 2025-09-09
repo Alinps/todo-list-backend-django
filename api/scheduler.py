@@ -8,3 +8,6 @@ def start():
     scheduler.add_job(send_due_tomorrow_notifications, 'cron', hour=9, minute=0)
     scheduler.start()
 
+
+
+
