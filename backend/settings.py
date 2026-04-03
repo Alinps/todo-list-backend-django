@@ -72,7 +72,7 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CRONJOBS = [
-    ("0 9 * * *", "api.cron.remind_due_tasks"),
+    ("* * * * *", "api.cron.remind_due_tasks"),
 ]
 
 

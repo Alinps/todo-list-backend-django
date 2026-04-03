@@ -7,7 +7,13 @@ from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from rest_framework.authtoken.models import Token
 from django.db.models import Q
-from .serializers import TaskSerializer, AdminUserSerializer
+from .serializers import (
+    TaskSerializer,
+    AdminUserSerializer,
+    ProfileDetailSerializer,
+    ProfileUpdateSerializer,
+    ChangePasswordSerializer,
+)
 from .models import Task, AuditLog, UserProfile
 from rest_framework.exceptions import PermissionDenied
 from datetime import date, timedelta
@@ -128,7 +134,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        tasks = Task.objects.filter(user=user).order_by('-due_date')
+        tasks = Task.objects.filter(user=user).order_by('-due_date', '-due_time')
 
         # --- Filtering by status ---
         status_param = self.request.query_params.get('status') # type: ignore
@@ -214,7 +220,14 @@ class TaskViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         instance = self.get_object()
         was_completed = instance.is_completed
+        old_due_date = instance.due_date
+        old_due_time = instance.due_time
         task = serializer.save()
+
+        # If schedule changed, allow reminder pipeline to send for the new schedule.
+        if old_due_date != task.due_date or old_due_time != task.due_time:
+            task.notified = False
+            task.save(update_fields=["notified"])
 
         now_completed = task.is_completed
         if was_completed != now_completed:
@@ -241,6 +254,59 @@ class TaskViewSet(viewsets.ModelViewSet):
 # views.py
 class ProfileViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=["get"])
+    def me(self, request):
+        UserProfile.objects.get_or_create(user=request.user)
+        data = ProfileDetailSerializer(request.user).data
+        logger.info("endpoint.profile.me success user=%s", _user_label(request))
+        return Response(data)
+
+    @action(detail=False, methods=["patch"], url_path="update")
+    def update_profile(self, request):
+        serializer = ProfileUpdateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+
+        user = request.user
+        user_fields = []
+        if "username" in validated:
+            user.username = validated["username"]
+            user_fields.append("username")
+        if "email" in validated:
+            user.email = validated["email"]
+            user_fields.append("email")
+        if user_fields:
+            user.save(update_fields=user_fields)
+
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        if "phone_number" in validated:
+            profile.phone_number = validated["phone_number"]
+            profile.save(update_fields=["phone_number"])
+
+        logger.info("endpoint.profile.update success user=%s fields=%s", _user_label(request), ",".join(validated.keys()))
+        return Response(ProfileDetailSerializer(user).data)
+
+    @action(detail=False, methods=["post"], url_path="change-password")
+    def change_password(self, request):
+        serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        user.set_password(serializer.validated_data["new_password"])
+        user.save(update_fields=["password"])
+
+        # Rotate token so old token cannot be reused.
+        Token.objects.filter(user=user).delete()
+        new_token = Token.objects.create(user=user)
+
+        logger.info("endpoint.profile.change_password success user=%s", _user_label(request))
+        return Response(
+            {
+                "message": "Password changed successfully.",
+                "token": new_token.key,
+            }
+        )
 
     @action(detail=False, methods=["post"])
     def upgrade_premium(self, request):
@@ -346,7 +412,7 @@ def tasks_due_tomorrow(request):
         due_date=tomorrow,
         is_completed=False,
         user=request.user  # only fetch tasks of the logged-in user
-    )
+    ).order_by("due_time")
     serializer = TaskSerializer(tasks, many=True)
     logger.info("endpoint.tasks_due_tomorrow success user=%s count=%s", _user_label(request), len(serializer.data))
     return Response(serializer.data)

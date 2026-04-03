@@ -1,5 +1,5 @@
 import logging
-from datetime import timedelta
+from datetime import datetime
 
 from django.conf import settings
 from django.core.mail import send_mail
@@ -14,38 +14,40 @@ logger = logging.getLogger(__name__)
 
 def remind_due_tasks():
     """
-    Sends one reminder per task due tomorrow through:
+    Sends one reminder per task when its due date-time is reached through:
     - in-app notification (Notification model)
     - SMS (if phone number is available)
     - email (if user email is available)
 
     Idempotency:
-    Uses Notification.get_or_create on a stable message format so repeated cron runs
-    do not resend duplicate reminders for the same task.
+    Uses Task.notified so repeated cron runs do not resend duplicate reminders.
     """
-    tomorrow = timezone.localdate() + timedelta(days=1)
+    now = timezone.now()
     tasks = Task.objects.select_related("user").filter(
-        due_date=tomorrow,
         is_completed=False,
+        notified=False,
     )
 
     sent_count = 0
-    skipped_existing = 0
+    skipped_not_due_yet = 0
     skipped_no_contact = 0
 
     for task in tasks:
+        due_naive = datetime.combine(task.due_date, task.due_time)
+        due_at = timezone.make_aware(due_naive, timezone.get_current_timezone())
+        if due_at > now:
+            skipped_not_due_yet += 1
+            continue
+
         user = task.user
         reminder_message = (
-            f"Reminder: Task '{task.title}' (ID: {task.id}) is due on {task.due_date:%Y-%m-%d}."
+            f"Task '{task.title}' (ID: {task.id}) is due at {due_at:%Y-%m-%d %H:%M}." # type: ignore
         )
 
-        notification, created = Notification.objects.get_or_create(
+        notification = Notification.objects.create(
             user=user,
             message=reminder_message,
         )
-        if not created:
-            skipped_existing += 1
-            continue
 
         sent_count += 1
 
@@ -74,14 +76,16 @@ def remind_due_tasks():
         logger.info(
             "cron.reminder.sent user=%s task_id=%s notification_id=%s",
             user.username,
-            task.id,
-            notification.id,
+            task.id, # type: ignore
+            notification.id, # type: ignore
         )
+        task.notified = True
+        task.save(update_fields=["notified"])
 
     logger.info(
-        "cron.reminder.summary due_tomorrow=%s sent=%s skipped_existing=%s skipped_no_contact=%s",
+        "cron.reminder.summary pending=%s sent=%s skipped_not_due_yet=%s skipped_no_contact=%s",
         tasks.count(),
         sent_count,
-        skipped_existing,
+        skipped_not_due_yet,
         skipped_no_contact,
     )

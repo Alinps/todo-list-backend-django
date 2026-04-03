@@ -10,5 +10,6 @@ def notify_due_date(user, task):
         return
 
     due_date_str = task.due_date.strftime("%d-%m-%Y")
-    msg = f"Hello {user.username}, reminder: Task '{task.title}' is due on {due_date_str}."
+    due_time_str = task.due_time.strftime("%H:%M") if getattr(task, "due_time", None) else "00:00"
+    msg = f"Hello {user.username}, reminder: Task '{task.title}' is due on {due_date_str} at {due_time_str}."
     send_sms(phone_number, msg)
