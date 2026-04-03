@@ -14,3 +14,4 @@ media/
 
 # Environment variables
 .env
+.codex

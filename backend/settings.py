@@ -16,18 +16,21 @@ from dotenv import load_dotenv
 load_dotenv()  # take environment variables from .env.
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-z3883)2p#y)$44vo9z)1!scxxy*+3onj@li%zs43=j#l83e!hz'
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-insecure-key")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "True") == "True"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+
 
 
 # Application definition
@@ -48,12 +51,14 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",   # 👈 Must be at the very TOP
+    "corsheaders.middleware.CorsMiddleware",   
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "api.middleware.RequestResponseLoggingMiddleware",
+    "api.rate_limit_middleware.RateLimitMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -67,7 +72,7 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CRONJOBS = [
-    ('* * * * *', 'api.cron.remind_due_tasks'),  
+    ("0 9 * * *", "api.cron.remind_due_tasks"),
 ]
 
 
@@ -78,11 +83,18 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.TokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',  # 👈 This might be the issue
+        'rest_framework.permissions.IsAuthenticated',  
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 5,
 }
+
+
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "True") == "True"
+RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "120"))
+RATE_LIMIT_PATH_PREFIXES = ["/api/"]
+RATE_LIMIT_EXEMPT_PATHS = []
 
 
 TEMPLATES = [
@@ -106,9 +118,13 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'alinps7034@gmail.com'
-EMAIL_HOST_PASSWORD = 'cbnt pfey zxvn ihsc'  # Use Gmail App Password, not your normal password
+EMAIL_HOST_USER =os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")  # Use Gmail App Password, not your normal password
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "")
 
 WSGI_APPLICATION = 'backend.wsgi.application'
 
@@ -119,11 +135,11 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'todo_db',
-        'USER': 'root',
-        'PASSWORD': '',  # use your real password
-        'HOST': 'localhost',
-        'PORT': '3306',
+        'NAME': os.getenv("DB_NAME", "todo_db"),
+        'USER': os.getenv("DB_USER", "root"),
+        'PASSWORD':  os.getenv("DB_PASSWORD", ""),  # use your real password
+        'HOST':  os.getenv("DB_HOST", "localhost"),
+        'PORT':  os.getenv("DB_PORT", "3306"),
     }
 }
 
@@ -168,3 +184,59 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "json": {
+            "()": "api.logging_formatter.JsonFormatter",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+        },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "formatter": "json",
+            "filename": str(LOG_DIR / "backend.log"),
+            "maxBytes": 10 * 1024 * 1024,
+            "backupCount": 5,
+            "encoding": "utf-8",
+        },
+    },
+    "root": {
+        "handlers": ["console", "file"],
+        "level": "WARNING",
+    },
+    "loggers": {
+        "api.middleware": {
+            "handlers": ["console", "file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "api.views": {
+            "handlers": ["console", "file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "api.rate_limit_middleware": {
+            "handlers": ["console", "file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "api.cron": {
+            "handlers": ["console", "file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "api.utils.sms_service": {
+            "handlers": ["console", "file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}

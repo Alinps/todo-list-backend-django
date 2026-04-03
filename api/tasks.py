@@ -2,6 +2,11 @@
 from datetime import date, timedelta
 from .models import Task, Notification
 from django.contrib.auth.models import User
+import time
+from django.utils import timezone
+from django.core.mail import send_mail
+from django.conf import settings
+from .models import Task
 
 def send_due_tomorrow_notifications():
     tomorrow = date.today() + timedelta(days=1)
@@ -19,18 +24,12 @@ def send_due_tomorrow_notifications():
 
 
 # tasks.py
-import time
-from django.utils import timezone
-from django.core.mail import send_mail
-from django.conf import settings
-from .models import Task
-
 
 def check_due_tasks():
     """Continuously check for due tasks and send notifications."""
     while True:
         now = timezone.now()
-        due_tasks = Task.objects.filter(due_date__lte=now, completed=False, notified=False)
+        due_tasks = Task.objects.filter(due_date__lte=now, is_completed=False, notified=False)
 
         for task in due_tasks:
             send_mail(
